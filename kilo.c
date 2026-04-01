@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <errno.h>
 #include <termios.h>
 #include <unistd.h>
@@ -12,8 +13,13 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 /*** data ***/
+struct editorConfig{
+    int screenrows;
+    int screencols;
+    struct termios orig_termios;
+};
 
-struct termios orig_termios;
+struct editorConfig E;
 
 /*** termina ***/
 
@@ -28,18 +34,18 @@ void die(const char *s){
 }
 
 void disableRawMode(){
-    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1){
+    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1){
         die("tcsetattr");
     }
 }
 
 void enableRawMode(){
-    if(tcgetattr(STDIN_FILENO, &orig_termios) == -1){
+    if(tcgetattr(STDIN_FILENO, &E.orig_termios) == -1){
         die("tcgetattr");
     }
     atexit(disableRawMode);
 
-    struct termios raw = orig_termios;
+    struct termios raw = E.orig_termios;
     //we are getting the binary values for flags (e.g. ECHO is 0001000) and then notting it and anding against the flags
     //This basically keepy every bit from the flags the same, except for the inverted bit inputted, which makes it 0 (e.g. ECHO is now 1110111)
 
@@ -84,6 +90,50 @@ char editorReadKey(){
     return c;
 }
 
+int getCursorPosition(int *rows, int *cols){
+    //create buffer
+    char buf[32];
+    unsigned int i = 0;
+
+    //Get cursor position
+    if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+
+    //goes through each index of the buffer (each index being a character/byte)
+    //reads the current terminal and breaks if errors occurs. each buf index is passed in as a reference.
+    while(i < sizeof(buf) - 1){
+        if(read(STDIN_FILENO, &buf[i], 1) != 1) break;
+        if(buf[i] == 'R') break;
+        i++;
+    }
+    //ends buf with \0 because we're gonna be using buf as a string and strings need to end in \0 for printf
+    buf[i] = '\0';
+
+    //Check the start of the buffer to make sure it has escape sequence \x1b and [
+    if(buf[0] != '\x1b' || buf[1] != '[') return -1;
+    //Then we do an sscanf of the characters right after
+    //We pass in string %d;%d and then rows and cols, essentially telling it to parse the numbers found in format num;num to parse into rows and cols
+    if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+    return 0;
+}
+
+int getWindowSize(int *rows, int *cols){
+    //Gets the size of the widnow and assigns it to ws_col and ws_row in ws. If failed, returns -1 or ws_cols will be 0.
+    struct winsize ws;
+
+    if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
+        //This is a backup attempt for if the default winsize ioctl doesn't work
+        //Move cursor 999 right and 999 down (stops at edge of screen)
+        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
+        return getCursorPosition(rows,cols);
+    }
+    else{
+        *cols= ws.ws_col;
+        *rows = ws.ws_row;
+        return 0;
+    }
+}
+
 /** input ***/
 
 void editorProcessKeypress(){
@@ -102,7 +152,7 @@ void editorProcessKeypress(){
 /*** output ***/
 
 void editorDrawRows(){
-    for(int y = 0; y < 24; y++){
+    for(int y = 0; y < E.screenrows; y++){
         write(STDOUT_FILENO, "~\r\n", 3);
     }
 }
@@ -126,8 +176,15 @@ void editorRefreshScreen(){
 
 /*** init ***/
 
+void initEditor(){
+    //Called on initialisation, assigns the correct values in our E (editorConfig struct) and if fails (which means -1 returned) it will die
+    if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+}
+
 int main() {
     enableRawMode();
+    initEditor();
+
     while (1){
         editorRefreshScreen();
         editorProcessKeypress();
