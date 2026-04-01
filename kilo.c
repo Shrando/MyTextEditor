@@ -103,12 +103,7 @@ void editorProcessKeypress(){
 
 void editorDrawRows(){
     for(int y = 0; y < 24; y++){
-        if(y == 0){
-            write(STDOUT_FILENO, "~Hello there\r\n", 3);
-        }
-        else{
         write(STDOUT_FILENO, "~\r\n", 3);
-        }
     }
 }
 
