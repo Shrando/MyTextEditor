@@ -149,11 +149,26 @@ void editorProcessKeypress(){
     }
 }
 
+/*** append buffer ***/
+//This will be used to create a write buffer instead of individual writes. This'll prevent flickering/weird visual delay between writes by buffering them all together.
+struct abuf{
+    char *b;
+    int len;
+}
+
+//This is basically a definition for creating a buffer with NULL characters and 0 len (essentially an empty buffer)
+#define ABUF_INIT {NULL, 0}
+
 /*** output ***/
 
 void editorDrawRows(){
     for(int y = 0; y < E.screenrows; y++){
-        write(STDOUT_FILENO, "~\r\n", 3);
+        //print ~ in every line
+        write(STDOUT_FILENO, "~", 3);
+        //print \r\n (basically new line) on every line except last
+        if(y < E.screenrows - 1){
+        write(STDOUT_FILENO, "\r\n", 3);
+        }
     }
 }
 
